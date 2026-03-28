@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wine Quality Prediction</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@500;600;700&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="page-glow page-glow-left"></div>
+    <div class="page-glow page-glow-right"></div>
+
+    <main class="layout">
+        <section class="hero card">
+            <div class="eyebrow">Machine Learning Showcase</div>
+            <h1>Wine Quality Prediction Studio</h1>
+            <p class="hero-copy">
+                This version uses your uploaded Random Forest notebook model logic and accepts normalized demo inputs for every feature.
+                Most inputs use 0 to 10, while pH now uses 0 to 14 before the backend maps values back to the wine feature scales.
+            </p>
+            <div class="hero-actions">
+                <button id="sampleButton" class="secondary-button" type="button">Use Sample Values</button>
+                <button id="predictButton" class="primary-button" type="button">Predict Quality</button>
+            </div>
+        </section>
+
+        <section class="panel-grid">
+            <section class="card inputs-card">
+                <div class="section-heading">
+                    <div>
+                        <p class="section-kicker">Input Panel</p>
+                        <h2>Normalized Wine Inputs</h2>
+                    </div>
+                    <p class="section-note">Most controls use 0 to 10 for easy demos, and pH uses 0 to 14.</p>
+                </div>
+
+                <form id="predictionForm" class="feature-grid" novalidate>
+                    {% for feature in feature_metadata %}
+                    <div class="feature-card" data-feature="{{ feature.name }}">
+                        <div class="feature-topline">
+                            <label for="{{ feature.name }}_slider">{{ feature.label }}</label>
+                            <span class="tooltip" tabindex="0" aria-label="{{ feature.description }}">i</span>
+                        </div>
+                        <p class="feature-description">{{ feature.description }}</p>
+                        <div class="feature-inputs">
+                            <input
+                                id="{{ feature.name }}_slider"
+                                class="feature-slider"
+                                type="range"
+                                min="{{ feature.min }}"
+                                max="{{ feature.max }}"
+                                step="{{ feature.step }}"
+                                value="{{ feature.default }}"
+                                data-target="{{ feature.name }}"
+                                data-default="{{ feature.default }}"
+                            >
+                            <input
+                                id="{{ feature.name }}"
+                                class="feature-number"
+                                type="number"
+                                min="{{ feature.min }}"
+                                max="{{ feature.max }}"
+                                step="{{ feature.step }}"
+                                value="{{ feature.default }}"
+                                data-target="{{ feature.name }}"
+                                data-default="{{ feature.default }}"
+                            >
+                        </div>
+                        <div class="feature-range">
+                            <span>{{ feature.min }}</span>
+                            <span class="current-value" id="{{ feature.name }}_value">{{ feature.default }}</span>
+                            <span>{{ feature.max }}</span>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </form>
+            </section>
+
+            <aside class="results-column">
+                <section class="card result-card">
+                    <div class="section-heading compact">
+                        <div>
+                            <p class="section-kicker">Prediction</p>
+                            <h2>Quality Result</h2>
+                        </div>
+                        <div id="loadingIndicator" class="loading hidden" aria-hidden="true"></div>
+                    </div>
+
+                    <div id="errorMessage" class="error-message hidden"></div>
+
+                    <div id="resultState" class="result-state idle">
+                        <span id="qualityBadge" class="quality-badge neutral">Awaiting Input</span>
+                        <div class="score-block">
+                            <span class="score-label">Predicted Score</span>
+                            <strong id="qualityScore">--.-/10</strong>
+                        </div>
+                        <p id="resultCaption" class="result-caption">
+                            Set the normalized feature values within the shown ranges, then run the model to see the predicted wine quality.
+                        </p>
+                    </div>
+                </section>
+
+                <section class="card chart-card">
+                    <div class="section-heading compact">
+                        <div>
+                            <p class="section-kicker">Model Insight</p>
+                            <h2>Feature Importance</h2>
+                        </div>
+                    </div>
+                    <canvas id="importanceChart" width="420" height="300"></canvas>
+                </section>
+            </aside>
+        </section>
+    </main>
+
+    <script>
+        window.featureImportance = {{ feature_importance | tojson }};
+    </script>
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>
