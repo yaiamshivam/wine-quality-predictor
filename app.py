@@ -11,12 +11,13 @@ BASE_DIR = Path(__file__).resolve().parent
 MODEL_PATH = BASE_DIR / "wine_quality_model.joblib"
 
 
-def quality_to_label(score: int | float) -> str:
-    if score <= 4:
-        return "Low"
-    if score <= 6:
-        return "Medium"
-    return "High"
+def clamp_score_by_label(score: float, label: str, calibration_rules: dict[str, dict[str, float]]) -> float:
+    rules = calibration_rules.get(label, {})
+    if "min" in rules:
+        score = max(score, float(rules["min"]))
+    if "max" in rules:
+        score = min(score, float(rules["max"]))
+    return score
 
 
 def denormalize_value(normalized_value: float, actual_min: float, actual_max: float, ui_max: float) -> float:
@@ -33,12 +34,14 @@ if not MODEL_PATH.exists():
 
 model_package = joblib.load(MODEL_PATH)
 scaler_model = model_package["scaler"]
+classifier_model = model_package["classifier"]
 regressor_model = model_package["regressor"]
 feature_columns = model_package["feature_columns"]
 feature_labels = model_package["feature_labels"]
 feature_metadata = model_package["feature_metadata"]
 feature_importance = model_package["feature_importance"]
 feature_ranges = model_package["feature_ranges"]
+calibration_rules = model_package["calibration_rules"]
 
 app = Flask(__name__)
 
@@ -80,13 +83,14 @@ def predict():
 
     features_df = pd.DataFrame([actual_values], columns=feature_columns)
     features_scaled = scaler_model.transform(features_df)
-    numeric_score = float(regressor_model.predict(features_scaled)[0])
+    predicted_label = classifier_model.predict(features_scaled)[0]
+    raw_score = float(regressor_model.predict(features_scaled)[0])
+    numeric_score = clamp_score_by_label(raw_score, predicted_label, calibration_rules)
     numeric_score = min(max(numeric_score, 0.0), 10.0)
-    label = quality_to_label(round(numeric_score))
 
     return jsonify(
         {
-            "quality_label": label,
+            "quality_label": predicted_label,
             "quality_score": f"{numeric_score:.1f}/10",
             "quality_value": round(numeric_score, 1),
         }

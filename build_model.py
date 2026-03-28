@@ -4,9 +4,10 @@ from pathlib import Path
 
 import joblib
 import pandas as pd
-from sklearn.ensemble import RandomForestRegressor
+from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
+from sklearn.utils import resample
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -60,6 +61,11 @@ FEATURE_UI_MAX = {
 }
 
 DEFAULT_UI_MAX = 10.0
+CALIBRATION_RULES = {
+    "Low": {"max": 4.4},
+    "Medium": {"min": 4.6, "max": 6.4},
+    "High": {"min": 6.6},
+}
 
 
 def get_ui_max(api_name: str) -> float:
@@ -72,10 +78,21 @@ def normalize_value(actual_value: float, actual_min: float, actual_max: float, u
     return ((actual_value - actual_min) / (actual_max - actual_min)) * ui_max
 
 
+def quality_to_label(score: int | float) -> str:
+    if score <= 4:
+        return "Low"
+    if score <= 6:
+        return "Medium"
+    return "High"
+
+
 def build_model_package() -> dict[str, object]:
-    data = pd.read_csv(DATASET_PATH).drop_duplicates()
+    data = pd.read_csv(DATASET_PATH).drop_duplicates().copy()
+    data["quality_label"] = data["quality"].apply(quality_to_label)
+
     x = data[FEATURE_COLUMNS]
-    y = data["quality"]
+    y_score = data["quality"]
+    y_label = data["quality_label"]
 
     feature_ranges: dict[str, dict[str, float]] = {}
     feature_metadata: list[dict[str, object]] = []
@@ -106,22 +123,50 @@ def build_model_package() -> dict[str, object]:
             }
         )
 
-    x_train, _x_test, y_train, _y_test = train_test_split(
+    x_train, _x_test, y_train_score, _y_test_score, y_train_label, _y_test_label = train_test_split(
         x,
-        y,
+        y_score,
+        y_label,
         test_size=0.2,
         random_state=42,
+        stratify=y_label,
     )
+
+    train_df = x_train.copy()
+    train_df["quality"] = y_train_score.values
+    train_df["quality_label"] = y_train_label.values
+
+    max_class_size = train_df["quality_label"].value_counts().max()
+    balanced_parts = []
+    for label, group in train_df.groupby("quality_label"):
+        balanced_parts.append(
+            resample(group, replace=True, n_samples=max_class_size, random_state=42)
+        )
+    balanced_train_df = pd.concat(balanced_parts).sample(frac=1, random_state=42).reset_index(drop=True)
 
     scaler = StandardScaler()
-    x_train_scaled = scaler.fit_transform(x_train)
+    x_train_classifier = balanced_train_df[FEATURE_COLUMNS]
+    y_train_classifier = balanced_train_df["quality_label"]
+    x_train_classifier_scaled = scaler.fit_transform(x_train_classifier)
+    x_train_regressor_scaled = scaler.transform(x_train)
 
-    regressor = RandomForestRegressor(
-        n_estimators=300,
-        max_depth=12,
+    classifier = RandomForestClassifier(
+        n_estimators=500,
+        class_weight="balanced_subsample",
         random_state=42,
     )
-    regressor.fit(x_train_scaled, y_train)
+    classifier.fit(x_train_classifier_scaled, y_train_classifier)
+
+    quality_counts = y_train_score.value_counts().to_dict()
+    regression_weights = y_train_score.map(lambda value: 1.0 / quality_counts[value]).to_numpy()
+    regression_weights = regression_weights / regression_weights.mean()
+
+    regressor = RandomForestRegressor(
+        n_estimators=500,
+        max_depth=None,
+        random_state=42,
+    )
+    regressor.fit(x_train_regressor_scaled, y_train_score, sample_weight=regression_weights)
 
     feature_importance = [
         {"feature": FEATURE_LABELS[column], "importance": round(float(score), 4)}
@@ -134,16 +179,19 @@ def build_model_package() -> dict[str, object]:
 
     return {
         "scaler": scaler,
+        "classifier": classifier,
         "regressor": regressor,
         "feature_columns": FEATURE_COLUMNS,
         "feature_labels": FEATURE_LABELS,
         "feature_metadata": feature_metadata,
         "feature_importance": feature_importance,
         "feature_ranges": feature_ranges,
+        "calibration_rules": CALIBRATION_RULES,
     }
 
 
 if __name__ == "__main__":
     model_package = build_model_package()
-    joblib.dump(model_package, MODEL_PATH)
+    joblib.dump(model_package, MODEL_PATH, compress=3)
     print(f"Saved trained model package to {MODEL_PATH}")
+    print(f"Compressed file size: {MODEL_PATH.stat().st_size} bytes")
