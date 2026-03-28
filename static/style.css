@@ -113,7 +113,9 @@ h2 {
 .hero-copy,
 .section-note,
 .feature-description,
-.result-caption {
+.result-caption,
+.generator-note,
+.feature-meta {
     color: var(--muted);
     line-height: 1.7;
 }
@@ -156,6 +158,10 @@ button:hover {
     border: 1px solid var(--border);
 }
 
+.wide-button {
+    width: 100%;
+}
+
 .panel-grid {
     display: grid;
     grid-template-columns: 1.45fr 0.95fr;
@@ -165,7 +171,8 @@ button:hover {
 
 .inputs-card,
 .result-card,
-.chart-card {
+.chart-card,
+.generator-card {
     padding: 1.5rem;
 }
 
@@ -191,6 +198,11 @@ button:hover {
     max-width: 17rem;
     margin: 0;
     font-size: 0.95rem;
+}
+
+.generator-note {
+    margin-top: 0;
+    margin-bottom: 1rem;
 }
 
 .feature-grid {
@@ -233,10 +245,16 @@ label {
 .feature-description {
     min-height: 3.4rem;
     font-size: 0.9rem;
-    margin: 0.75rem 0 1rem;
+    margin: 0.75rem 0 0.4rem;
 }
 
-.feature-inputs {
+.feature-meta {
+    margin: 0 0 0.9rem;
+    font-size: 0.82rem;
+}
+
+.feature-inputs,
+.quality-target-inputs {
     display: grid;
     grid-template-columns: 1fr 110px;
     gap: 0.8rem;
@@ -274,6 +292,62 @@ input[type="range"] {
 .current-value {
     color: var(--text);
     font-weight: 700;
+}
+
+.preset-row {
+    display: flex;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+    flex-wrap: wrap;
+}
+
+.chip-button {
+    flex: 1;
+    min-width: 90px;
+    padding: 0.8rem 1rem;
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text);
+}
+
+.poor-chip {
+    background: rgba(255, 107, 107, 0.12);
+    color: var(--low);
+}
+
+.medium-chip {
+    background: rgba(246, 196, 83, 0.12);
+    color: var(--medium);
+}
+
+.high-chip {
+    background: rgba(89, 217, 142, 0.12);
+    color: var(--high);
+}
+
+.quality-target-block {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 22px;
+    padding: 1rem;
+    margin-bottom: 1rem;
+}
+
+.quality-target-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.9rem;
+}
+
+.quality-target-header strong {
+    font-size: 1.2rem;
+    color: var(--gold);
+}
+
+.target-range {
+    margin-top: 0.75rem;
 }
 
 .result-state {
@@ -388,7 +462,8 @@ input[type="range"] {
     .hero,
     .inputs-card,
     .result-card,
-    .chart-card {
+    .chart-card,
+    .generator-card {
         padding: 1.2rem;
         border-radius: 22px;
     }
@@ -397,15 +472,18 @@ input[type="range"] {
         grid-template-columns: 1fr;
     }
 
-    .feature-inputs {
+    .feature-inputs,
+    .quality-target-inputs {
         grid-template-columns: 1fr;
     }
 
-    .hero-actions {
+    .hero-actions,
+    .preset-row {
         flex-direction: column;
     }
 
-    button {
+    button,
+    .chip-button {
         width: 100%;
     }
 }

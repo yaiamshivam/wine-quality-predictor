@@ -20,10 +20,8 @@ def clamp_score_by_label(score: float, label: str, calibration_rules: dict[str, 
     return score
 
 
-def denormalize_value(normalized_value: float, actual_min: float, actual_max: float, ui_max: float) -> float:
-    if actual_max == actual_min:
-        return actual_min
-    return actual_min + ((normalized_value / ui_max) * (actual_max - actual_min))
+def nearest_target_key(target_quality: float, available_keys: list[str]) -> str:
+    return min(available_keys, key=lambda key: abs(float(key) - target_quality))
 
 
 if not MODEL_PATH.exists():
@@ -42,6 +40,9 @@ feature_metadata = model_package["feature_metadata"]
 feature_importance = model_package["feature_importance"]
 feature_ranges = model_package["feature_ranges"]
 calibration_rules = model_package["calibration_rules"]
+quality_range = model_package["quality_range"]
+quality_presets = model_package["quality_presets"]
+target_feature_profiles = model_package["target_feature_profiles"]
 
 app = Flask(__name__)
 
@@ -52,6 +53,8 @@ def index():
         "index.html",
         feature_metadata=feature_metadata,
         feature_importance=feature_importance,
+        quality_range=quality_range,
+        quality_presets=quality_presets,
     )
 
 
@@ -63,23 +66,16 @@ def predict():
         actual_values = []
         for column in feature_columns:
             api_name = feature_labels[column]
-            normalized_value = float(payload[api_name])
-            ui_min = feature_ranges[api_name]["ui_min"]
-            ui_max = feature_ranges[api_name]["ui_max"]
-            if normalized_value < ui_min or normalized_value > ui_max:
-                return jsonify({"error": f"{api_name} must be between {ui_min:g} and {ui_max:g}."}), 400
-            actual_values.append(
-                denormalize_value(
-                    normalized_value,
-                    feature_ranges[api_name]["actual_min"],
-                    feature_ranges[api_name]["actual_max"],
-                    ui_max,
-                )
-            )
+            value = float(payload[api_name])
+            min_value = feature_ranges[api_name]["actual_min"]
+            max_value = feature_ranges[api_name]["actual_max"]
+            if value < min_value or value > max_value:
+                return jsonify({"error": f"{api_name} must be between {min_value:.2f} and {max_value:.2f}."}), 400
+            actual_values.append(value)
     except KeyError as exc:
         return jsonify({"error": f"Missing field: {exc.args[0]}"}), 400
     except (TypeError, ValueError):
-        return jsonify({"error": "All inputs must be numeric and within their allowed ranges."}), 400
+        return jsonify({"error": "All inputs must be numeric and within the shown dataset ranges."}), 400
 
     features_df = pd.DataFrame([actual_values], columns=feature_columns)
     features_scaled = scaler_model.transform(features_df)
@@ -93,6 +89,32 @@ def predict():
             "quality_label": predicted_label,
             "quality_score": f"{numeric_score:.1f}/10",
             "quality_value": round(numeric_score, 1),
+        }
+    )
+
+
+@app.post("/recommend-features")
+def recommend_features():
+    payload = request.get_json(silent=True) or {}
+    try:
+        target_quality = float(payload["target_quality"])
+    except KeyError:
+        return jsonify({"error": "Missing field: target_quality"}), 400
+    except (TypeError, ValueError):
+        return jsonify({"error": "target_quality must be numeric."}), 400
+
+    min_quality = float(quality_range["min"])
+    max_quality = float(quality_range["max"])
+    if target_quality < min_quality or target_quality > max_quality:
+        return jsonify({"error": f"target_quality must be between {min_quality:.1f} and {max_quality:.1f}."}), 400
+
+    matched_key = nearest_target_key(target_quality, list(target_feature_profiles.keys()))
+    suggested_features = target_feature_profiles[matched_key]
+    return jsonify(
+        {
+            "target_quality": round(float(matched_key), 1),
+            "quality_label": "Low" if float(matched_key) <= 4 else ("Medium" if float(matched_key) <= 6 else "High"),
+            "features": suggested_features,
         }
     )
 

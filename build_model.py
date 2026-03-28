@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import joblib
+import numpy as np
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.model_selection import train_test_split
@@ -56,26 +57,17 @@ FEATURE_DESCRIPTIONS = {
     "alcohol": "Alcohol percentage by volume.",
 }
 
-FEATURE_UI_MAX = {
-    "pH": 14.0,
-}
-
-DEFAULT_UI_MAX = 10.0
 CALIBRATION_RULES = {
     "Low": {"max": 4.4},
     "Medium": {"min": 4.6, "max": 6.4},
     "High": {"min": 6.6},
 }
 
-
-def get_ui_max(api_name: str) -> float:
-    return FEATURE_UI_MAX.get(api_name, DEFAULT_UI_MAX)
-
-
-def normalize_value(actual_value: float, actual_min: float, actual_max: float, ui_max: float) -> float:
-    if actual_max == actual_min:
-        return 0.0
-    return ((actual_value - actual_min) / (actual_max - actual_min)) * ui_max
+QUALITY_PRESETS = {
+    "poor": 4.0,
+    "medium": 5.5,
+    "high": 7.5,
+}
 
 
 def quality_to_label(score: int | float) -> str:
@@ -84,6 +76,24 @@ def quality_to_label(score: int | float) -> str:
     if score <= 6:
         return "Medium"
     return "High"
+
+
+def clamp_score_by_label(score: float, label: str, calibration_rules: dict[str, dict[str, float]]) -> float:
+    rules = calibration_rules.get(label, {})
+    if "min" in rules:
+        score = max(score, float(rules["min"]))
+    if "max" in rules:
+        score = min(score, float(rules["max"]))
+    return score
+
+
+def infer_step(min_value: float, max_value: float) -> float:
+    spread = max_value - min_value
+    if spread > 100:
+        return 1.0
+    if spread > 10:
+        return 0.1
+    return 0.01
 
 
 def build_model_package() -> dict[str, object]:
@@ -101,14 +111,12 @@ def build_model_package() -> dict[str, object]:
         api_name = FEATURE_LABELS[column]
         actual_min = float(x[column].min())
         actual_max = float(x[column].max())
-        ui_max = get_ui_max(api_name)
-        default_normalized = normalize_value(float(x[column].median()), actual_min, actual_max, ui_max)
+        default_value = float(x[column].median())
+        step = infer_step(actual_min, actual_max)
 
         feature_ranges[api_name] = {
             "actual_min": actual_min,
             "actual_max": actual_max,
-            "ui_min": 0.0,
-            "ui_max": ui_max,
         }
         feature_metadata.append(
             {
@@ -116,10 +124,10 @@ def build_model_package() -> dict[str, object]:
                 "name": api_name,
                 "label": column.title(),
                 "description": FEATURE_DESCRIPTIONS[api_name],
-                "min": 0.0,
-                "max": ui_max,
-                "step": 0.1,
-                "default": round(default_normalized, 1),
+                "min": round(actual_min, 2),
+                "max": round(actual_max, 2),
+                "step": step,
+                "default": round(default_value, 2),
             }
         )
 
@@ -138,10 +146,8 @@ def build_model_package() -> dict[str, object]:
 
     max_class_size = train_df["quality_label"].value_counts().max()
     balanced_parts = []
-    for label, group in train_df.groupby("quality_label"):
-        balanced_parts.append(
-            resample(group, replace=True, n_samples=max_class_size, random_state=42)
-        )
+    for _label, group in train_df.groupby("quality_label"):
+        balanced_parts.append(resample(group, replace=True, n_samples=max_class_size, random_state=42))
     balanced_train_df = pd.concat(balanced_parts).sample(frac=1, random_state=42).reset_index(drop=True)
 
     scaler = StandardScaler()
@@ -177,6 +183,33 @@ def build_model_package() -> dict[str, object]:
         )
     ]
 
+    all_scaled = scaler.transform(x)
+    all_predicted_labels = classifier.predict(all_scaled)
+    all_raw_scores = regressor.predict(all_scaled)
+    all_calibrated_scores = np.array(
+        [clamp_score_by_label(float(score), label, CALIBRATION_RULES) for score, label in zip(all_raw_scores, all_predicted_labels)]
+    )
+
+    target_feature_profiles: dict[str, dict[str, float]] = {}
+    quality_min = float(y_score.min())
+    quality_max = float(y_score.max())
+    for target in np.arange(quality_min, quality_max + 0.001, 0.1):
+        target_label = quality_to_label(target)
+        penalties = np.where(all_predicted_labels == target_label, 0.0, 0.35)
+        best_index = int(np.argmin(np.abs(all_calibrated_scores - target) + penalties))
+        row = x.iloc[best_index]
+        target_feature_profiles[f"{target:.1f}"] = {
+            FEATURE_LABELS[column]: round(float(row[column]), 4)
+            for column in FEATURE_COLUMNS
+        }
+
+    quality_range = {
+        "min": quality_min,
+        "max": quality_max,
+        "step": 0.1,
+        "default": 5.5,
+    }
+
     return {
         "scaler": scaler,
         "classifier": classifier,
@@ -187,6 +220,9 @@ def build_model_package() -> dict[str, object]:
         "feature_importance": feature_importance,
         "feature_ranges": feature_ranges,
         "calibration_rules": CALIBRATION_RULES,
+        "quality_range": quality_range,
+        "quality_presets": QUALITY_PRESETS,
+        "target_feature_profiles": target_feature_profiles,
     }
 
 
